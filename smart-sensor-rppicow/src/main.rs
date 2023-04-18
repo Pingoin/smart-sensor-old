@@ -14,10 +14,17 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25};
 use embassy_rp::pio::{Pio0, PioPeripherial, PioStateMachineInstance, Sm0};
 use embassy_time::{Duration, Timer};
-use embedded_io::asynch::Write;
+use embedded_io::asynch::{Read, Write};
 use heapless::Vec;
+use numtoa::NumToA;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
+
+use rust_mqtt::{
+    client::{client::MqttClient, client_config::ClientConfig},
+    packet::v5::reason_codes::ReasonCode,
+    utils::rng_generator::CountingRng,
+};
 
 macro_rules! singleton {
     ($val:expr) => {{
@@ -50,15 +57,15 @@ async fn main(spawner: Spawner) {
     info!("Hello World");
     let p = embassy_rp::init(Default::default());
     // Include the WiFi firmware and Country Locale Matrix (CLM) blobs.
-    //let fw = include_bytes!("../firmware/43439A0.bin");
-    //let clm = include_bytes!("../firmware/43439A0_clm.bin");
+    let fw = include_bytes!("../firmware/43439A0.bin");
+    let clm = include_bytes!("../firmware/43439A0_clm.bin");
 
     // To make flashing faster for development, you may want to flash the firmwares independently
     // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
     //     probe-rs-cli download 43439A0.bin --format bin --chip RP2040 --base-address 0x10100000
     //     probe-rs-cli download 43439A0_clm.bin --format bin --chip RP2040 --base-address 0x10140000
-    let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 224190) };
-    let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
+    //let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 224190) };
+    //let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
 
     let pwr = Output::new(p.PIN_23, Level::Low);
     let cs = Output::new(p.PIN_25, Level::High);
@@ -101,16 +108,19 @@ async fn main(spawner: Spawner) {
         .join_wpa2(app_config.wifi_ssid, app_config.wifi_psk)
         .await;
 
+    info!("{:?}", 3);
+
     // Then we can use it!
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
-    let mut buf = [0; 4096];
 
     let mut sock = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
     sock.set_timeout(Some(embassy_net::SmolDuration::from_secs(5)));
     sock.set_keep_alive(Some(embassy_net::SmolDuration::from_secs(2)));
 
-    let remote_endpoint = (Ipv4Address::from_bytes(&app_config.mqtt_server), 1234);
+    Timer::after(Duration::from_secs(10)).await;
+
+    let remote_endpoint = (Ipv4Address::from_bytes(&app_config.mqtt_server), 1883);
     info!("connecting to {:?}...", remote_endpoint);
     let r = sock.connect(remote_endpoint).await;
     if let Err(e) = r {
@@ -118,25 +128,52 @@ async fn main(spawner: Spawner) {
         return;
     }
     info!("connected!");
-    loop {
-        let r = sock.write_all(b"Hello!\n").await;
-        info!("Sending");
-        if let Err(e) = r {
-            warn!("write error: {:?}", e);
-        }
-        let n = match sock.read(&mut buf).await {
-            Ok(0) => {
-                warn!("read EOF");
-                break;
-            }
-            Ok(n) => n,
-            Err(e) => {
-                warn!("read error: {:?}", e);
-                break;
-            }
-        };
 
-        info!("rxd {}", from_utf8(&buf[..n]).unwrap());
-        Timer::after(Duration::from_secs(10)).await;
+    let mut config = ClientConfig::new(
+        rust_mqtt::client::client_config::MqttVersion::MQTTv5,
+        CountingRng(20000),
+    );
+    config.add_max_subscribe_qos(rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS1);
+    config.add_client_id("client");
+    // config.add_username(USERNAME);
+    // config.add_password(PASSWORD);
+    config.max_packet_size = 100;
+    let mut recv_buffer = [0; 100];
+    let mut write_buffer = [0; 100];
+
+    let mut client =
+        MqttClient::<_, 5, _>::new(sock, &mut write_buffer, 100, &mut recv_buffer, 100, config);
+
+    let mut bla = 0u8;
+    let mut output_buffer = [0u8; 10];
+
+    match client.connect_to_broker().await {
+        Ok(_) => {}
+        Err(err) => {
+            warn!("error connecting to mqtt: {:?}", err)
+        }
+    };
+let mut led=true;
+    loop {
+        control.gpio_set(0, led).await;
+        led=!led;
+        client
+            .send_message(
+                "hello/gurke",
+                bla.numtoa(10, &mut output_buffer),
+                rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS0,
+                true,
+            )
+            .await
+            .unwrap();
+        info!("pong");
+        for _ in 0..10 {
+            Timer::after(Duration::from_secs(1)).await;
+            info!("ping");
+            client.send_ping().await.unwrap();
+        }
+
+        bla += 1;
+        bla %= 100;
     }
 }
