@@ -1,0 +1,19 @@
+(kicad_sch (version 20211123) (generator eeschema)
+
+  (uuid 84a9eb8e-10d7-4f4b-a98b-95b4fe3db583)
+
+  (paper "A4")
+
+  (lib_symbols
+  )
+
+
+  (text "pico-w\nGy- htu21" (at 251.46 49.53 0)
+    (effects (font (size 1.27 1.27)) (justify left bottom))
+    (uuid c543f488-a56c-4044-847d-fa7b58a3cc15)
+  )
+
+  (sheet_instances
+    (path "/" (page "1"))
+  )
+)

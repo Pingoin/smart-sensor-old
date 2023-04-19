@@ -4,7 +4,6 @@
 #![feature(async_fn_in_trait)]
 #![allow(incomplete_features)]
 
-use core::str::from_utf8;
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
@@ -14,7 +13,6 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25};
 use embassy_rp::pio::{Pio0, PioPeripherial, PioStateMachineInstance, Sm0};
 use embassy_time::{Duration, Timer};
-use embedded_io::asynch::{Read, Write};
 use heapless::Vec;
 use numtoa::NumToA;
 use static_cell::StaticCell;
@@ -22,7 +20,6 @@ use {defmt_rtt as _, panic_probe as _};
 
 use rust_mqtt::{
     client::{client::MqttClient, client_config::ClientConfig},
-    packet::v5::reason_codes::ReasonCode,
     utils::rng_generator::CountingRng,
 };
 
@@ -48,6 +45,99 @@ async fn wifi_task(
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
     stack.run().await
+}
+
+#[embassy_executor::task]
+async fn mqtt_task(stack: &'static Stack<cyw43::NetDriver<'static>>, server: Ipv4Address) {
+    info!("{:?}", 3);
+
+    // Then we can use it!
+    let mut rx_buffer = [0; 4096];
+    let mut tx_buffer = [0; 4096];
+
+    let mut sock = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+    sock.set_timeout(Some(embassy_net::SmolDuration::from_secs(5)));
+    sock.set_keep_alive(Some(embassy_net::SmolDuration::from_secs(2)));
+
+    let mut config = ClientConfig::new(
+        rust_mqtt::client::client_config::MqttVersion::MQTTv5,
+        CountingRng(20000),
+    );
+    config.add_max_subscribe_qos(rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS1);
+    config.add_client_id("client");
+    // config.add_username(USERNAME);
+    // config.add_password(PASSWORD);
+    config.max_packet_size = 100;
+
+    let mut recv_buffer = [0; 100];
+    let mut write_buffer = [0; 100];
+
+    let mut bla = 0u8;
+    let mut output_buffer = [0u8; 10];
+
+    let remote_endpoint = (server, 1883);
+
+    info!("connecting to {:?}...", remote_endpoint);
+
+    loop {
+        match sock.connect(remote_endpoint).await {
+            Ok(_) => {
+                info!("connected TCP");
+                break;
+            }
+            Err(err) => {
+                warn!("connect error: {:?}", err);
+                info!("retrying...");
+                Timer::after(Duration::from_millis(500)).await;
+            }
+        }
+    }
+    let mut client =
+        MqttClient::<_, 5, _>::new(sock, &mut write_buffer, 100, &mut recv_buffer, 100, config);
+    loop {
+        match client.connect_to_broker().await {
+            Ok(_) => {
+                info!("connected MQTT");
+                break;
+            }
+            Err(err) => {
+                warn!("error connecting to mqtt: {:?}", err);
+                info!("retrying...");
+                Timer::after(Duration::from_millis(500)).await;
+            }
+        };
+    }
+    loop {
+        client
+            .send_message(
+                "hello/gurken",
+                bla.numtoa(10, &mut output_buffer),
+                rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS0,
+                true,
+            )
+            .await
+            .unwrap();
+
+        bla = (bla + 1) % 100;
+
+        info!("pong");
+        for _ in 0..10 {
+           'errorLoop: loop {
+                match client.send_ping().await {
+                    Ok(_) => {
+                        info!("Mqtt-ping");
+                        break 'errorLoop;
+                    }
+                    Err(err) => {
+                        warn!("error at keepalive mqtt: {:?}", err);
+                        info!("retrying...");
+                        Timer::after(Duration::from_millis(500)).await;
+                    }
+                }
+            }
+            Timer::after(Duration::from_secs(1)).await;
+        }
+    }
 }
 
 #[embassy_executor::main]
@@ -102,78 +192,12 @@ async fn main(spawner: Spawner) {
     ));
 
     unwrap!(spawner.spawn(net_task(stack)));
-
     //control.join_open(env!("WIFI_NETWORK")).await;
     control
         .join_wpa2(app_config.wifi_ssid, app_config.wifi_psk)
         .await;
-
-    info!("{:?}", 3);
-
-    // Then we can use it!
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-
-    let mut sock = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-    sock.set_timeout(Some(embassy_net::SmolDuration::from_secs(5)));
-    sock.set_keep_alive(Some(embassy_net::SmolDuration::from_secs(2)));
-
-    Timer::after(Duration::from_secs(10)).await;
-
-    let remote_endpoint = (Ipv4Address::from_bytes(&app_config.mqtt_server), 1883);
-    info!("connecting to {:?}...", remote_endpoint);
-    let r = sock.connect(remote_endpoint).await;
-    if let Err(e) = r {
-        warn!("connect error: {:?}", e);
-        return;
-    }
-    info!("connected!");
-
-    let mut config = ClientConfig::new(
-        rust_mqtt::client::client_config::MqttVersion::MQTTv5,
-        CountingRng(20000),
-    );
-    config.add_max_subscribe_qos(rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS1);
-    config.add_client_id("client");
-    // config.add_username(USERNAME);
-    // config.add_password(PASSWORD);
-    config.max_packet_size = 100;
-    let mut recv_buffer = [0; 100];
-    let mut write_buffer = [0; 100];
-
-    let mut client =
-        MqttClient::<_, 5, _>::new(sock, &mut write_buffer, 100, &mut recv_buffer, 100, config);
-
-    let mut bla = 0u8;
-    let mut output_buffer = [0u8; 10];
-
-    match client.connect_to_broker().await {
-        Ok(_) => {}
-        Err(err) => {
-            warn!("error connecting to mqtt: {:?}", err)
-        }
-    };
-let mut led=true;
-    loop {
-        control.gpio_set(0, led).await;
-        led=!led;
-        client
-            .send_message(
-                "hello/gurke",
-                bla.numtoa(10, &mut output_buffer),
-                rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS0,
-                true,
-            )
-            .await
-            .unwrap();
-        info!("pong");
-        for _ in 0..10 {
-            Timer::after(Duration::from_secs(1)).await;
-            info!("ping");
-            client.send_ping().await.unwrap();
-        }
-
-        bla += 1;
-        bla %= 100;
-    }
+    unwrap!(spawner.spawn(mqtt_task(
+        stack,
+        Ipv4Address::from_bytes(&app_config.mqtt_server)
+    )));
 }
