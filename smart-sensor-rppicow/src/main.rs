@@ -12,11 +12,12 @@ use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Stack, StackResources};
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25};
 use embassy_rp::pio::{Pio0, PioPeripherial, PioStateMachineInstance, Sm0};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Timer, Ticker};
 use heapless::Vec;
 use numtoa::NumToA;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
+use futures::StreamExt;
 
 use rust_mqtt::{
     client::{client::MqttClient, client_config::ClientConfig},
@@ -49,94 +50,91 @@ async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
 
 #[embassy_executor::task]
 async fn mqtt_task(stack: &'static Stack<cyw43::NetDriver<'static>>, server: Ipv4Address) {
-    info!("{:?}", 3);
-
-    // Then we can use it!
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-
-    let mut sock = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-    sock.set_timeout(Some(embassy_net::SmolDuration::from_secs(5)));
-    sock.set_keep_alive(Some(embassy_net::SmolDuration::from_secs(2)));
-
-    let mut config = ClientConfig::new(
-        rust_mqtt::client::client_config::MqttVersion::MQTTv5,
-        CountingRng(20000),
-    );
-    config.add_max_subscribe_qos(rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS1);
-    config.add_client_id("client");
-    // config.add_username(USERNAME);
-    // config.add_password(PASSWORD);
-    config.max_packet_size = 100;
-
-    let mut recv_buffer = [0; 100];
-    let mut write_buffer = [0; 100];
-
-    let mut bla = 0u8;
-    let mut output_buffer = [0u8; 10];
+    let mut bla = 0u64;
 
     let remote_endpoint = (server, 1883);
-
-    info!("connecting to {:?}...", remote_endpoint);
-
+    let mut ticker = Ticker::every(Duration::from_secs(10));
     loop {
-        match sock.connect(remote_endpoint).await {
-            Ok(_) => {
-                info!("connected TCP");
-                break;
-            }
-            Err(err) => {
-                warn!("connect error: {:?}", err);
-                info!("retrying...");
-                Timer::after(Duration::from_millis(500)).await;
-            }
-        }
-    }
-    let mut client =
-        MqttClient::<_, 5, _>::new(sock, &mut write_buffer, 100, &mut recv_buffer, 100, config);
-    loop {
-        match client.connect_to_broker().await {
-            Ok(_) => {
-                info!("connected MQTT");
-                break;
-            }
-            Err(err) => {
-                warn!("error connecting to mqtt: {:?}", err);
-                info!("retrying...");
-                Timer::after(Duration::from_millis(500)).await;
-            }
-        };
-    }
-    loop {
-        client
-            .send_message(
-                "hello/gurken",
-                bla.numtoa(10, &mut output_buffer),
-                rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS0,
-                true,
-            )
-            .await
-            .unwrap();
+        info!("opening");
+        
+        // Then we can use it!
+        let mut rx_buffer = [0; 4096];
+        let mut tx_buffer = [0; 4096];
 
-        bla = (bla + 1) % 100;
+        let mut recv_buffer = [0; 100];
+        let mut write_buffer = [0; 100];
 
-        info!("pong");
-        for _ in 0..10 {
-           'errorLoop: loop {
-                match client.send_ping().await {
-                    Ok(_) => {
-                        info!("Mqtt-ping");
-                        break 'errorLoop;
-                    }
-                    Err(err) => {
-                        warn!("error at keepalive mqtt: {:?}", err);
-                        info!("retrying...");
-                        Timer::after(Duration::from_millis(500)).await;
-                    }
+        let mut output_buffer = [0u8; 10];
+        let mut sock = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        sock.set_timeout(Some(embassy_net::SmolDuration::from_secs(5)));
+        sock.set_keep_alive(Some(embassy_net::SmolDuration::from_secs(2)));
+
+        let mut config = ClientConfig::new(
+            rust_mqtt::client::client_config::MqttVersion::MQTTv5,
+            CountingRng(20000),
+        );
+        config.add_max_subscribe_qos(rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS1);
+        config.add_client_id("client");
+        // config.add_username(USERNAME);
+        // config.add_password(PASSWORD);
+        config.max_packet_size = 100;
+
+        info!("connecting to {:?}...", remote_endpoint);
+
+        loop {
+            match sock.connect(remote_endpoint).await {
+                Ok(_) => {
+                    info!("connected TCP");
+                    break;
+                }
+                Err(err) => {
+                    warn!("connect error: {:?}", err);
+                    info!("retrying...");
+                    Timer::after(Duration::from_millis(500)).await;
                 }
             }
-            Timer::after(Duration::from_secs(1)).await;
         }
+        let mut client =
+            MqttClient::<_, 5, _>::new(sock, &mut write_buffer, 100, &mut recv_buffer, 100, config);
+        loop {
+            match client.connect_to_broker().await {
+                Ok(_) => {
+                    info!("connected MQTT");
+                    break;
+                }
+                Err(err) => {
+                    warn!("error connecting to mqtt: {:?}", err);
+                    info!("retrying...");
+                    Timer::after(Duration::from_millis(500)).await;
+                }
+            };
+        }
+        loop {
+            match client
+                .send_message(
+                    "hello/gurken",
+                    bla.numtoa(10, &mut output_buffer),
+                    rust_mqtt::packet::v5::publish_packet::QualityOfService::QoS0,
+                    true,
+                )
+                .await
+            {
+                Ok(_) => {
+                    info!("pong: {}", &bla);
+                    Timer::after(Duration::from_millis(5)).await;
+                    break;
+                }
+                Err(err) => {
+                    warn!("error publish to mqtt: {:?}", err);
+                    info!("retrying...");
+                    Timer::after(Duration::from_millis(500)).await;
+                }
+            }
+        }
+        bla = (bla + 1) % 200;
+        client.disconnect().await.unwrap();
+        info!("closed");
+        ticker.next().await;
     }
 }
 
