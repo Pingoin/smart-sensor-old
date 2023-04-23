@@ -17,16 +17,16 @@ default-members = ["smart-sensor-rppicow"]
 
 
 [patch.crates-io]
-cyw43 = { git = "https://github.com/embassy-rs/cyw43", rev = "20ea35f" }
-cyw43-pio = { git = "https://github.com/embassy-rs/cyw43", rev = "20ea35f" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
-embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
-embassy-net = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
-embassy-net-driver = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
-embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy", rev = "e3f8020c3bdf726dfa451b5b190f27191507a18f" }
+cyw43 = { git = "https://github.com/embassy-rs/cyw43", rev = "efb67df" }
+cyw43-pio = { git = "https://github.com/embassy-rs/cyw43", rev = "efb67df" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
+embassy-net = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
+embassy-net-driver = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
+embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy", rev = "047ea9066f0d946fd4d706577b21df38fd3b1647" }
 
 [profile.dev]
 debug = 2

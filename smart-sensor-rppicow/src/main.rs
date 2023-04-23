@@ -10,13 +10,15 @@ use embassy_executor::Spawner;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Stack, StackResources};
 use embassy_rp::adc::{self, Adc};
-use embassy_rp::gpio::{Level, Output};
+use embassy_rp::gpio::{Level, Output, Pin};
 use embassy_rp::interrupt;
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25};
-use embassy_rp::pio::{Pio0, PioPeripherial, PioStateMachineInstance, Sm0};
+use embassy_rp::pio::{Pio0, PioPeripheral, PioStateMachineInstance, Sm0};
 use embassy_time::{Duration, Ticker, Timer};
-use futures::StreamExt;
 use heapless::Vec;
+
+mod converts;
+mod neo_pixel;
 
 use smart_sensor::{mutex_box::MutexBox, round_to_n_places, SensorData};
 use static_cell::StaticCell;
@@ -27,6 +29,9 @@ use rust_mqtt::{
     utils::rng_generator::CountingRng,
 };
 
+use crate::converts::convert_to_celsius;
+use crate::neo_pixel::{led_task, Ws2812};
+
 macro_rules! singleton {
     ($val:expr) => {{
         type T = impl Sized;
@@ -36,6 +41,7 @@ macro_rules! singleton {
 }
 
 static SENSOR_DATA: MutexBox<SensorData> = MutexBox::new("sensor_data");
+const MAX_MQTT_PACKET: usize = 1024;
 
 #[embassy_executor::task]
 async fn wifi_task(
@@ -61,11 +67,11 @@ async fn mqtt_task(stack: &'static Stack<cyw43::NetDriver<'static>>, server: Ipv
         info!("opening");
 
         // Then we can use it!
-        let mut rx_buffer = [0; 4096];
-        let mut tx_buffer = [0; 4096];
+        let mut rx_buffer = [0; MAX_MQTT_PACKET];
+        let mut tx_buffer = [0; MAX_MQTT_PACKET];
 
-        let mut recv_buffer = [0; 3000];
-        let mut write_buffer = [0; 3000];
+        let mut recv_buffer = [0; MAX_MQTT_PACKET];
+        let mut write_buffer = [0; MAX_MQTT_PACKET];
 
         let mut sock = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         sock.set_timeout(Some(embassy_net::SmolDuration::from_secs(5)));
@@ -79,7 +85,7 @@ async fn mqtt_task(stack: &'static Stack<cyw43::NetDriver<'static>>, server: Ipv
         config.add_client_id("client");
         // config.add_username(USERNAME);
         // config.add_password(PASSWORD);
-        config.max_packet_size = 100;
+        config.max_packet_size = MAX_MQTT_PACKET as u32;
 
         info!("connecting to {:?}...", remote_endpoint);
 
@@ -121,7 +127,7 @@ async fn mqtt_task(stack: &'static Stack<cyw43::NetDriver<'static>>, server: Ipv
             }
         });
 
-        let mut buff = [0; 100];
+        let mut buff = [0; MAX_MQTT_PACKET];
         match serde_json_core::ser::to_slice(&sensordata, &mut buff) {
             Ok(size) => loop {
                 match client
@@ -216,6 +222,7 @@ async fn main(spawner: Spawner) {
     control
         .join_wpa2(app_config.wifi_ssid, app_config.wifi_psk)
         .await;
+    let mut ticker = Ticker::every(Duration::from_secs(10));
     unwrap!(spawner.spawn(mqtt_task(
         stack,
         Ipv4Address::from_bytes(&app_config.mqtt_server)
@@ -223,8 +230,15 @@ async fn main(spawner: Spawner) {
 
     let irq = interrupt::take!(ADC_IRQ_FIFO);
     let mut adc = Adc::new(p.ADC, irq, adc::Config::default());
+    let (_pio0, sm0, _sm1, _sm2, _sm3) = p.PIO1.split();
+    let ws2812 = Ws2812::new(sm0, p.PIN_19.degrade());
 
+    unwrap!(spawner.spawn(led_task(ws2812)));
+
+    let mut led = true;
     loop {
+        control.gpio_set(0, led).await;
+        led = !led;
         let temp = adc.read_temperature().await;
         let temp = round_to_n_places(convert_to_celsius(temp), 1);
 
@@ -233,11 +247,6 @@ async fn main(spawner: Spawner) {
         });
 
         info!("Temp: {} degrees", temp);
-        Timer::after(Duration::from_secs(1)).await;
+        ticker.next().await;
     }
-}
-
-fn convert_to_celsius(raw_temp: u16) -> f32 {
-    // According to chapter 4.9.5. Temperature Sensor in RP2040 datasheet
-    27.0 - (raw_temp as f32 * 3.3 / 4096.0 - 0.706) / 0.001721 as f32
 }
