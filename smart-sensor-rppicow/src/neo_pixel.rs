@@ -1,4 +1,3 @@
-use defmt::debug;
 use embassy_rp::gpio::{self};
 use embassy_rp::pio::{
     FifoJoin, PioInstance, PioInstanceBase, PioStateMachine, PioStateMachineInstance,
@@ -93,17 +92,14 @@ impl<P: PioInstance, S: SmInstance> Ws2812<P, S> {
 
 /// Input a value 0 to 255 to get a color value
 /// The colours are a transition r - g - b - back to r.
-pub fn wheel(mut wheel_pos: u8) -> RGB8 {
-    wheel_pos = 255 - wheel_pos;
-    if wheel_pos < 85 {
-        return (255 - wheel_pos * 3, 0, wheel_pos * 3).into();
+pub fn status_light_val(mut wheel_pos: u8, dimm: u8) -> RGB8 {
+    if wheel_pos <= 127 {
+        wheel_pos = wheel_pos * 2;
+        return ((255) / dimm, (wheel_pos) / dimm, 0).into();
+    } else {
+        wheel_pos = (wheel_pos - 128) * 2;
+        return ((255 - wheel_pos) / dimm, 255 / dimm, 0).into();
     }
-    if wheel_pos < 170 {
-        wheel_pos -= 85;
-        return (0, wheel_pos * 3, 255 - wheel_pos * 3).into();
-    }
-    wheel_pos -= 170;
-    (wheel_pos * 3, 255 - wheel_pos * 3, 0).into()
 }
 
 #[embassy_executor::task]
@@ -115,15 +111,13 @@ pub async fn led_task(mut ws2812: Ws2812<PioInstanceBase<1>, Sm0>) -> ! {
 
     // Loop forever making RGB values and pushing them out to the WS2812.
     loop {
-        for j in 0..(256 * 5) {
-            debug!("New Colors:");
+        for j in 0..(255) {
             for i in 0..NUM_LEDS {
-                data[i] = wheel((((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8);
-                debug!("R: {} G: {} B: {}", data[i].r, data[i].g, data[i].b);
+                data[i] = status_light_val(j, 50);
             }
             ws2812.write(&data).await;
 
-            Timer::after(Duration::from_micros(50)).await;
+            Timer::after(Duration::from_millis(500)).await;
         }
     }
 }
