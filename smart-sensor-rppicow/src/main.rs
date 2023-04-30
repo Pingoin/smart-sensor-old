@@ -8,21 +8,23 @@ use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
 
-use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Stack, StackResources};
+use embassy_net::udp::UdpSocket;
+use embassy_net::{Config, Ipv4Address, Ipv4Cidr, PacketMetadata, Stack, StackResources};
 use embassy_rp::adc::{self, Adc};
 use embassy_rp::gpio::{Level, Output, Pin};
 use embassy_rp::interrupt;
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25};
 use embassy_rp::pio::{Pio0, PioPeripheral, PioStateMachineInstance, Sm0};
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Ticker, Timer};
 use heapless::Vec;
-
 mod converts;
 mod mqtt;
 mod neo_pixel;
 
 use smart_sensor::{mutex_box::MutexBox, round_to_n_places, SensorData};
 use static_cell::StaticCell;
+use wall_clock_time::clock_time::ClockTime;
+use wall_clock_time::sntpc;
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::converts::convert_to_celsius;
@@ -37,6 +39,38 @@ macro_rules! singleton {
 }
 
 static SENSOR_DATA: MutexBox<SensorData> = MutexBox::new("sensor_data");
+
+#[embassy_executor::task]
+pub async fn ntp_task(stack: &'static Stack<cyw43::NetDriver<'static>>, server: Ipv4Address) {
+    // Then we can use it!
+    let mut rx_meta = [PacketMetadata::EMPTY; 16];
+    let mut rx_buffer = [0; 4096];
+    let mut tx_meta = [PacketMetadata::EMPTY; 16];
+    let mut tx_buffer = [0; 4096];
+
+    let mut socket = UdpSocket::new(
+        stack,
+        &mut rx_meta,
+        &mut rx_buffer,
+        &mut tx_meta,
+        &mut tx_buffer,
+    );
+    socket.bind(9400).unwrap();
+    let mut time = ClockTime::new();
+    let mut ntp_client = sntpc::NtpTime::new(socket, (server, 123));
+    loop {
+        let result = ntp_client.update_time(time.get_unix_time()).await;
+        if let Some(timestamp) = result {
+            time.update(timestamp);
+            let datetime = time.get_date_time();
+            println!(
+                "Got time: {:02}:{:02}:{:02}.{:03}",
+                datetime.hour+2, datetime.minute, datetime.second, datetime.millis
+            );
+        }
+        Timer::after(Duration::from_secs(3)).await;
+    }
+}
 
 #[embassy_executor::task]
 async fn wifi_task(
@@ -127,6 +161,10 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(mqtt::mqtt_task(
         stack,
         Ipv4Address::from_bytes(&app_config.mqtt_server)
+    )));
+    unwrap!(spawner.spawn(ntp_task(
+        stack,
+        Ipv4Address::from_bytes(&[192, 168, 178, 1])
     )));
 
     let irq = interrupt::take!(ADC_IRQ_FIFO);

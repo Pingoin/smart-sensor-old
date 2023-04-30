@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+wall-clock-time= {path = "../wall-clock-time"}
 smart-sensor = { path = ".." }
 cyw43 = { version = "0.1.0", features = ["defmt", "firmware-logs"] }
 cyw43-pio = { version = "0.1.0" }
@@ -30,6 +31,7 @@ embassy-rp = { version = "0.1.0", features = [
 embassy-net = { version = "0.1.0", features = [
     "defmt",
     "tcp",
+    "udp",
     "dhcpv4",
     "medium-ethernet",
     "unstable-traits",
@@ -58,3 +60,7 @@ serde-json-core = "0.5.0"
 pio-proc = "0.2"
 pio = "0.2.1"
 smart-leds = "0.3.0"
+sntpc = { version = "0.3.2", default-features = false }
+no-std-net = "0.6.0"
+smoltcp = { version = "0.9.1", default-features = false, features = [] }
+embassy-futures = "0.1.0"

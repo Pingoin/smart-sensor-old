@@ -1,0 +1,26 @@
+[package]
+name = "wall-clock-time"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+embassy-net = { version = "0.1.0", features = [
+    "defmt",
+    "tcp",
+    "udp",
+    "dhcpv4",
+    "medium-ethernet",
+    "unstable-traits",
+    "nightly",
+] }
+
+embassy-time = { version = "0.1.0", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
+
+[features]
+default = ["sntp"]
+sntp=[]
