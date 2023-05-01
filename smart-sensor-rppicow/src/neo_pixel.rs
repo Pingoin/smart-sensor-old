@@ -113,7 +113,7 @@ pub async fn led_task(mut ws2812: Ws2812<PioInstanceBase<1>, Sm0>) -> ! {
     loop {
         for j in 0..(255) {
             for i in 0..NUM_LEDS {
-                data[i] = status_light_val(j, 50);
+                data[i] = status_light_val(j, 10);
             }
             ws2812.write(&data).await;
 

@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 wall-clock-time= {path = "../wall-clock-time"}
 smart-sensor = { path = ".." }
-cyw43 = { version = "0.1.0", features = ["defmt", "firmware-logs"] }
+cyw43 = { version = "0.1.0", features = ["defmt"] }
 cyw43-pio = { version = "0.1.0" }
 embassy-executor = { version = "0.1.0", features = [
     "defmt",

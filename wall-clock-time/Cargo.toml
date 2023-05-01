@@ -20,6 +20,7 @@ embassy-time = { version = "0.1.0", features = [
     "defmt",
     "defmt-timestamp-uptime",
 ] }
+cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 
 [features]
 default = ["sntp"]

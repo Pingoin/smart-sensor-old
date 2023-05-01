@@ -6,7 +6,7 @@ use embassy_net::udp::UdpSocket;
 use embassy_net::Ipv4Address;
 use embassy_time::Instant;
 
-use crate::clock_time::UnixTimeStamp;
+use crate::get_unix_time;
 
 /// SNTP mode value bit mask
 const MODE_MASK: u8 = 0b0000_0111;
@@ -44,8 +44,8 @@ impl NtpTime<'_> {
         return NtpTime { socket, adress };
     }
 
-    async fn sntp_send_request(&mut self, timestamp: &UnixTimeStamp) -> Result<SendRequestResult> {
-        let request = NtpPacket::new(timestamp);
+    async fn sntp_send_request(&mut self) -> Result<SendRequestResult> {
+        let request = NtpPacket::new();
         if let Err(err) = self.send_request(&request).await {
             return Err(err);
         }
@@ -61,14 +61,21 @@ impl NtpTime<'_> {
         };
     }
 
-    pub async fn update_time(&mut self, timestamp: UnixTimeStamp) -> Option<Instant> {
-        let result = self.sntp_send_request(&timestamp).await.unwrap();
-        let result = self.sntp_process_response(result, timestamp).await;
+    pub async fn update_time(&mut self) -> Option<NtpRequestResult> {
+        let result = self.sntp_send_request().await.unwrap();
+
+
+        let result = self.sntp_process_response(result).await;
         if let Ok(data) = result {
             let ntp_time =
                 (data.sec() as u64) * 1_000_000 + (data.sec_fraction() as u64) % 1_000_000;
+            let result = NtpRequestResult {
+                time: Instant::from_micros(ntp_time),
+                offset: data.offset(),
+                roundtime: data.roundtrip(),
+            };
 
-            return Some(Instant::from_micros(ntp_time));
+            return Some(result);
         }
         None
     }
@@ -76,7 +83,6 @@ impl NtpTime<'_> {
     async fn sntp_process_response(
         &mut self,
         send_req_result: SendRequestResult,
-        timestamp: UnixTimeStamp,
     ) -> Result<NtpResult> {
         let mut response_buf = RawNtpPacket::default();
         let (response, _) = self
@@ -84,7 +90,7 @@ impl NtpTime<'_> {
             .recv_from(response_buf.0.as_mut())
             .await
             .unwrap();
-        let recv_timestamp = get_ntp_timestamp(&timestamp);
+        let recv_timestamp = get_ntp_timestamp();
         if response != mem::size_of::<NtpPacket>() {
             return Err(Error::IncorrectPayload);
         }
@@ -94,6 +100,12 @@ impl NtpTime<'_> {
             Err(err) => Err(err),
         };
     }
+}
+
+pub struct NtpRequestResult {
+    pub time: Instant,
+    pub offset: i64,
+    pub roundtime: u64,
 }
 
 #[derive(Debug)]
@@ -233,8 +245,8 @@ impl NtpPacket {
     const SNTP_CLIENT_MODE: u8 = 3;
     const SNTP_VERSION: u8 = 4 << 3;
 
-    pub fn new(timestamp_gen: &UnixTimeStamp) -> NtpPacket {
-        let tx_timestamp = get_ntp_timestamp(timestamp_gen);
+    pub fn new() -> NtpPacket {
+        let tx_timestamp = get_ntp_timestamp();
 
         #[cfg(feature = "log")]
         debug!(target: "NtpPacket::new", "{}", tx_timestamp);
@@ -478,7 +490,8 @@ fn offset_calculate(t1: u64, t2: u64, t3: u64, t4: u64, units: Units) -> i64 {
     }
 }
 
-fn get_ntp_timestamp(unix_time: &UnixTimeStamp) -> u64 {
+fn get_ntp_timestamp() -> u64 {
+    let unix_time=get_unix_time();
     let timestamp = ((unix_time.secs + (u64::from(NtpPacket::NTP_TIMESTAMP_DELTA))) << 32)
         + u64::from(unix_time.micro_secs as u64 * u32::MAX as u64 / USEC_IN_SEC as u64);
 

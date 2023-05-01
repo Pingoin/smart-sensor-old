@@ -54,6 +54,12 @@ impl ClockTime {
     }
 }
 
+impl Default for ClockTime {
+    fn default() -> Self {
+        Self { duration: Default::default() }
+    }
+}
+
 pub struct UnixTimeStamp {
     pub secs: u64,
     pub micro_secs: u32,
@@ -69,3 +75,4 @@ pub struct DateTime {
     pub millis: u16,
     pub micros: u16,
 }
+
